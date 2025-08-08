@@ -46,7 +46,7 @@ html,body{margin:0;height:100%;width:100%;background:#000;font-family:-apple-sys
 </div>
 
 <script>
-console.log('🌐 Twitch GitHub Pages Embed v2.2 - Enhanced with Mature Content Handler');
+console.log('🌐 Twitch GitHub Pages Embed v2.3 - Enhanced with Iframe Interaction');
 console.log('📍 URL:', window.location.href);
 console.log('🖥️ User Agent:', navigator.userAgent);
 
@@ -122,7 +122,7 @@ function attemptMatureContentBypass() {
     if (!config.autoBypassMature) return false;
     
     try {
-        debugLog('🔍 Searching for mature content elements... (v2.2)');
+        debugLog('🔍 Searching for mature content elements... (v2.3)');
         
         // First, log the entire DOM structure we can see
         const bodyChildCount = document.body ? document.body.children.length : 0;
@@ -132,133 +132,201 @@ function attemptMatureContentBypass() {
         
         debugLog(`📊 DOM Stats: ${bodyChildCount} body children, ${allDivs} divs, ${allButtons} buttons, ${allIframes} iframes`);
         
-        // Check if we're inside an iframe ourselves
-        const isInIframe = window !== window.top;
-        debugLog(`🪟 Running in iframe: ${isInIframe}`);
+        // Since we confirmed the mature content is in the iframe, let's focus on iframe interaction
+        const twitchIframe = document.querySelector('#twitch iframe') || document.querySelector('iframe');
         
-        // Try to access the top window if we're in an iframe
-        let searchDocument = document;
-        try {
-            if (isInIframe && window.top && window.top.document) {
-                searchDocument = window.top.document;
-                debugLog('🔍 Searching in parent window document');
-            }
-        } catch (e) {
-            debugLog(`❌ Cannot access parent window: ${e.message}`);
-        }
-        
-        // Use the EXACT selectors the user provided
-        const specificSelectors = [
-            '#channel-player-gate > div > div > div.Layout-sc-1xcs6mc-0.dUxMTz > div > button',
-            'button[data-a-target="content-classification-gate-overlay-start-watching-button"]',
-            '#channel-player-gate button',
-            '#channel-player-gate',
-            '[data-a-target="tw-core-button-label-text"]',
-            '[data-a-target*="start-watching"]',
-            '[data-a-target*="gate-overlay"]',
-            '[data-a-target*="classification"]'
-        ];
-        
-        // Try each specific selector on both documents
-        const documentsToSearch = [document];
-        if (searchDocument !== document) {
-            documentsToSearch.push(searchDocument);
-        }
-        
-        for (const doc of documentsToSearch) {
-            debugLog(`🔍 Searching in ${doc === document ? 'current' : 'parent'} document`);
+        if (twitchIframe) {
+            debugLog(`🎯 Found iframe: ${twitchIframe.src || 'no src'}`);
             
-            for (const selector of specificSelectors) {
-                try {
-                    const elements = doc.querySelectorAll(selector);
-                    debugLog(`  Selector "${selector}": found ${elements.length} elements`);
+            // Method 1: Try to access iframe content (might fail due to CORS)
+            try {
+                const iframeDoc = twitchIframe.contentDocument || twitchIframe.contentWindow.document;
+                if (iframeDoc) {
+                    debugLog('✅ Can access iframe content directly!');
                     
-                    for (const element of elements) {
-                        const text = (element.textContent || element.innerText || '').trim();
-                        const isVisible = element.offsetParent !== null;
-                        const rect = element.getBoundingClientRect();
-                        const hasSize = rect.width > 0 && rect.height > 0;
+                    // Try the exact selectors the user provided
+                    const specificSelectors = [
+                        '#channel-player-gate > div > div > div.Layout-sc-1xcs6mc-0.dUxMTz > div > button',
+                        'button[data-a-target="content-classification-gate-overlay-start-watching-button"]',
+                        '#channel-player-gate button',
+                        '#channel-player-gate',
+                        '[data-a-target="tw-core-button-label-text"]'
+                    ];
+                    
+                    for (const selector of specificSelectors) {
+                        const elements = iframeDoc.querySelectorAll(selector);
+                        debugLog(`  Iframe selector "${selector}": found ${elements.length} elements`);
                         
-                        debugLog(`    Element: ${element.tagName} - "${text.substring(0, 30)}" - visible: ${isVisible} - hasSize: ${hasSize}`);
-                        
-                        if ((text.toLowerCase().includes('start watching') || 
-                             selector.includes('content-classification-gate') ||
-                             selector.includes('start-watching')) && 
-                            (isVisible || hasSize)) {
+                        for (const element of elements) {
+                            const text = (element.textContent || element.innerText || '').trim();
+                            debugLog(`    Iframe element: ${element.tagName} - "${text}"`);
                             
-                            debugLog(`✅ FOUND TARGET! Clicking: ${element.tagName} with text "${text}"`);
-                            element.click();
-                            updateStatus('Auto-clicked Start Watching', 'success');
+                            if (text.toLowerCase().includes('start watching') || 
+                                selector.includes('content-classification-gate') ||
+                                selector.includes('start-watching')) {
+                                debugLog(`✅ FOUND TARGET IN IFRAME! Clicking: ${element.tagName}`);
+                                element.click();
+                                updateStatus('Auto-clicked Start Watching (iframe)', 'success');
+                                return true;
+                            }
+                        }
+                    }
+                    
+                    // Search all elements in iframe
+                    const allIframeElements = iframeDoc.querySelectorAll('*');
+                    let iframeButtonsFound = 0;
+                    
+                    for (const element of allIframeElements) {
+                        const text = (element.textContent || element.innerText || '').trim();
+                        const tagName = element.tagName.toLowerCase();
+                        
+                        if (tagName === 'button') {
+                            iframeButtonsFound++;
+                            debugLog(`    Iframe button: "${text.substring(0, 30)}"`);
+                        }
+                        
+                        if (text.toLowerCase().includes('start watching') && element.offsetParent !== null) {
+                            debugLog(`🎯 Found "Start Watching" in iframe: ${tagName} - "${text}"`);
+                            const clickTarget = element.closest('button') || element;
+                            clickTarget.click();
+                            updateStatus('Auto-clicked Start Watching (iframe)', 'success');
                             return true;
                         }
                     }
-                } catch (selectorError) {
-                    debugLog(`❌ Selector "${selector}" failed: ${selectorError.message}`);
+                    
+                    debugLog(`📊 Iframe search: ${allIframeElements.length} elements, ${iframeButtonsFound} buttons`);
+                }
+            } catch (crossOriginError) {
+                debugLog(`❌ Cannot access iframe content: ${crossOriginError.message}`);
+            }
+            
+            // Method 2: Send PostMessage to iframe
+            try {
+                debugLog('📨 Sending postMessage to iframe...');
+                twitchIframe.contentWindow.postMessage({
+                    type: 'CLICK_START_WATCHING',
+                    action: 'bypass_mature_content',
+                    selectors: [
+                        '#channel-player-gate > div > div > div.Layout-sc-1xcs6mc-0.dUxMTz > div > button',
+                        'button[data-a-target="content-classification-gate-overlay-start-watching-button"]'
+                    ]
+                }, '*');
+                
+                // Also try the Twitch domain specifically
+                twitchIframe.contentWindow.postMessage({
+                    type: 'CLICK_START_WATCHING',
+                    action: 'bypass_mature_content'
+                }, 'https://player.twitch.tv');
+                
+                debugLog('📨 PostMessages sent');
+            } catch (postError) {
+                debugLog(`❌ PostMessage failed: ${postError.message}`);
+            }
+            
+            // Method 3: Simulate clicking on the iframe at likely button positions
+            const rect = twitchIframe.getBoundingClientRect();
+            const clickPositions = [
+                { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }, // Center
+                { x: rect.left + rect.width / 2, y: rect.top + rect.height * 0.6 }, // Lower center
+                { x: rect.left + rect.width / 2, y: rect.top + rect.height * 0.7 }, // Even lower
+            ];
+            
+            for (const pos of clickPositions) {
+                debugLog(`🖱️ Simulating click at iframe position (${pos.x.toFixed(0)}, ${pos.y.toFixed(0)})`);
+                
+                // Create and dispatch mouse events
+                const events = ['mousedown', 'mouseup', 'click'];
+                for (const eventType of events) {
+                    const event = new MouseEvent(eventType, {
+                        clientX: pos.x,
+                        clientY: pos.y,
+                        bubbles: true,
+                        cancelable: true,
+                        view: window
+                    });
+                    
+                    // Dispatch on the iframe
+                    twitchIframe.dispatchEvent(event);
+                    
+                    // Also try dispatching on the document at that position
+                    const elementAtPosition = document.elementFromPoint(pos.x, pos.y);
+                    if (elementAtPosition) {
+                        elementAtPosition.dispatchEvent(event);
+                    }
+                }
+            }
+            
+            // Method 4: Focus iframe and send keyboard events
+            try {
+                debugLog('⌨️ Sending keyboard events to iframe...');
+                twitchIframe.focus();
+                
+                const keyEvents = [
+                    { key: 'Enter', code: 'Enter', keyCode: 13 },
+                    { key: ' ', code: 'Space', keyCode: 32 },
+                    { key: 'Tab', code: 'Tab', keyCode: 9 }
+                ];
+                
+                keyEvents.forEach((keyData, index) => {
+                    setTimeout(() => {
+                        const keyEvent = new KeyboardEvent('keydown', {
+                            key: keyData.key,
+                            code: keyData.code,
+                            keyCode: keyData.keyCode,
+                            bubbles: true,
+                            cancelable: true
+                        });
+                        
+                        twitchIframe.dispatchEvent(keyEvent);
+                        debugLog(`⌨️ Sent ${keyData.key} key to iframe`);
+                    }, index * 100);
+                });
+            } catch (keyError) {
+                debugLog(`❌ Keyboard events failed: ${keyError.message}`);
+            }
+            
+            debugLog('✅ Attempted all iframe interaction methods');
+            return true; // We tried something
+        }
+        
+        // Fallback: Search main document (but we know this won't find it)
+        debugLog('🔍 Fallback: searching main document...');
+        
+        const allElements = document.querySelectorAll('*');
+        let realStartWatchingFound = 0;
+        
+        for (const element of allElements) {
+            // Skip our own debug elements and HTML/BODY with all content
+            if (element.closest && (element.closest('.debug-panel') || 
+                element.closest('.controls') || 
+                element.closest('.status') ||
+                element.closest('.latency-display'))) {
+                continue;
+            }
+            
+            if (element.tagName === 'HTML' || element.tagName === 'BODY') {
+                continue; // Skip these as they contain all page text
+            }
+            
+            const text = (element.textContent || element.innerText || '').trim();
+            
+            // Only look for elements that have ONLY "Start Watching" as their text content
+            if (text.toLowerCase() === 'start watching' && element.offsetParent !== null) {
+                realStartWatchingFound++;
+                debugLog(`🎯 Found isolated "Start Watching" text: ${element.tagName}`);
+                
+                const clickTarget = element.closest('button') || element;
+                try {
+                    clickTarget.click();
+                    updateStatus('Auto-clicked Start Watching (main doc)', 'success');
+                    return true;
+                } catch (clickError) {
+                    debugLog(`❌ Click failed: ${clickError.message}`);
                 }
             }
         }
         
-        // More aggressive search - look for ANY button with "Start Watching" text
-        for (const doc of documentsToSearch) {
-            const allElements = doc.querySelectorAll('*');
-            let elementsChecked = 0;
-            let buttonsFound = 0;
-            let startWatchingFound = 0;
-            
-            for (const element of allElements) {
-                elementsChecked++;
-                
-                // Skip our own debug elements
-                if (element.closest && (element.closest('.debug-panel') || 
-                    element.closest('.controls') || 
-                    element.closest('.status') ||
-                    element.closest('.latency-display'))) {
-                    continue;
-                }
-                
-                const text = (element.textContent || element.innerText || '').trim();
-                const tagName = element.tagName.toLowerCase();
-                const dataTarget = element.getAttribute('data-a-target') || '';
-                const id = element.id || '';
-                const className = element.className || '';
-                
-                if (tagName === 'button') {
-                    buttonsFound++;
-                    debugLog(`    Button found: "${text.substring(0, 30)}" - data-target: "${dataTarget}"`);
-                }
-                
-                // Look for text containing "start watching"
-                if (text.toLowerCase().includes('start watching')) {
-                    startWatchingFound++;
-                    const isVisible = element.offsetParent !== null;
-                    const rect = element.getBoundingClientRect();
-                    
-                    debugLog(`🎯 "Start Watching" text found in ${tagName}: "${text}" - visible: ${isVisible} - rect: ${rect.width}x${rect.height}`);
-                    
-                    if (isVisible || (rect.width > 0 && rect.height > 0)) {
-                        const clickTarget = element.closest('button') || element;
-                        debugLog(`✅ CLICKING! Target: ${clickTarget.tagName}`);
-                        
-                        try {
-                            clickTarget.click();
-                            updateStatus('Auto-clicked Start Watching', 'success');
-                            return true;
-                        } catch (clickError) {
-                            debugLog(`❌ Click failed: ${clickError.message}`);
-                        }
-                    }
-                }
-                
-                // Look for specific IDs or classes
-                if (id.includes('gate') || id.includes('player') || 
-                    className.includes('gate') || className.includes('overlay') ||
-                    dataTarget.includes('gate') || dataTarget.includes('classification')) {
-                    debugLog(`    Interesting element: ${tagName}#${id}.${className} - data-target: "${dataTarget}"`);
-                }
-            }
-            
-            debugLog(`📊 Search complete: ${elementsChecked} elements, ${buttonsFound} buttons, ${startWatchingFound} "Start Watching" texts`);
-        }
+        debugLog(`📊 Main document: found ${realStartWatchingFound} isolated "Start Watching" elements`);
         
         return false;
     } catch (e) {
@@ -271,7 +339,7 @@ function attemptMatureContentBypass() {
 function startMatureContentMonitoring() {
     if (!config.autoBypassMature || matureContentMonitor) return;
     
-    debugLog('🔍 Starting aggressive mature content monitoring v2.2...');
+    debugLog('🔍 Starting aggressive mature content monitoring v2.3...');
     matureRetryCount = 0;
     
     // Set up MutationObserver to watch for dynamically added content
@@ -576,6 +644,19 @@ window.addEventListener('unitydata', function(e) {
     }
 });
 
+// Listen for postMessage responses from iframe
+window.addEventListener('message', function(event) {
+    debugLog(`📨 Received postMessage: ${JSON.stringify(event.data)} from ${event.origin}`);
+    
+    if (event.data && event.data.type === 'MATURE_CONTENT_CLICKED') {
+        debugLog('✅ Iframe confirmed mature content button was clicked!');
+        updateStatus('Iframe clicked Start Watching', 'success');
+        stopMatureContentMonitoring();
+    } else if (event.data && event.data.type === 'MATURE_CONTENT_NOT_FOUND') {
+        debugLog('❌ Iframe could not find mature content button');
+    }
+});
+
 // Latency monitoring
 function startLatencyMonitoring() {
     if (latencyMonitor) clearInterval(latencyMonitor);
@@ -794,5 +875,5 @@ window.addEventListener('beforeunload', function() {
     }
 });
 
-debugLog('🌐 GitHub Pages Twitch embed initialized with mature content bypass v2.2');
+debugLog('🌐 GitHub Pages Twitch embed initialized with mature content bypass v2.3');
 </script></body></html>
