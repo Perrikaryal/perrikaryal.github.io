@@ -45,7 +45,7 @@ html,body{margin:0;height:100%;width:100%;background:#000;font-family:-apple-sys
 </div>
 
 <script>
-console.log('🌐 Twitch GitHub Pages Embed v2.0');
+console.log('🌐 Twitch GitHub Pages Embed v2.1 - Enhanced with Mature Content Handler');
 console.log('📍 URL:', window.location.href);
 console.log('🖥️ User Agent:', navigator.userAgent);
 
@@ -57,6 +57,7 @@ const volume = parseFloat(urlParams.get('volume')) || 0.1;
 const autoplay = urlParams.get('autoplay') !== 'false';
 const muted = urlParams.get('muted') === 'true';
 const debug = urlParams.get('debug') === 'true';
+const autoBypassMature = urlParams.get('autoBypassMature') !== 'false'; // New parameter
 
 // Configuration
 const config = {
@@ -66,8 +67,11 @@ const config = {
     autoplay: autoplay,
     muted: muted,
     debug: debug,
+    autoBypassMature: autoBypassMature,
     latencyInterval: 1000,
-    latencyTimeout: 5000
+    latencyTimeout: 5000,
+    matureCheckInterval: 500,
+    maxMatureRetries: 20
 };
 
 console.log('⚙️ Config:', config);
@@ -81,11 +85,13 @@ let debugContent = document.getElementById('debug-content');
 
 let player = null;
 let latencyMonitor = null;
+let matureContentMonitor = null;
 let currentLatency = -1;
 let lastLatencyUpdate = 0;
 let playerReady = false;
 let latencyDisplayVisible = false;
 let debugPanelVisible = false;
+let matureRetryCount = 0;
 
 // Debug logging
 const debugLogs = [];
@@ -107,6 +113,92 @@ function updateStatus(msg, type = '') {
     if (statusDiv) {
         statusDiv.innerHTML = '🌐 ' + msg;
         statusDiv.className = 'status' + (type ? ' ' + type : '');
+    }
+}
+
+// Mature content bypass function
+function attemptMatureContentBypass() {
+    if (!config.autoBypassMature) return false;
+    
+    try {
+        // Look for the Twitch player iframe
+        const iframe = document.querySelector('#twitch iframe');
+        if (!iframe) return false;
+        
+        const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+        if (!iframeDoc) return false;
+        
+        // Common selectors for the "Start Watching" button
+        const possibleSelectors = [
+            'button[data-a-target="player-overlay-mature-accept"]',
+            'button[aria-label="Start Watching"]',
+            '.mature-content-overlay button',
+            '.content-overlay-gate button',
+            'button:contains("Start Watching")',
+            'button[data-test-selector="mature-content-gate-button"]'
+        ];
+        
+        for (const selector of possibleSelectors) {
+            const button = iframeDoc.querySelector(selector);
+            if (button && button.offsetParent !== null) { // Check if visible
+                debugLog(`🎯 Found mature content button with selector: ${selector}`);
+                button.click();
+                updateStatus('Auto-clicked Start Watching', 'success');
+                return true;
+            }
+        }
+        
+        // Alternative approach: look for any button containing "Start Watching" text
+        const allButtons = iframeDoc.querySelectorAll('button');
+        for (const button of allButtons) {
+            if (button.textContent && 
+                (button.textContent.toLowerCase().includes('start watching') ||
+                 button.textContent.toLowerCase().includes('continue'))) {
+                debugLog(`🎯 Found mature content button by text: "${button.textContent}"`);
+                button.click();
+                updateStatus('Auto-clicked Start Watching', 'success');
+                return true;
+            }
+        }
+        
+        return false;
+    } catch (e) {
+        debugLog(`❌ Mature content bypass error: ${e.message}`);
+        return false;
+    }
+}
+
+// Start monitoring for mature content warnings
+function startMatureContentMonitoring() {
+    if (!config.autoBypassMature || matureContentMonitor) return;
+    
+    debugLog('🔍 Starting mature content monitoring...');
+    matureRetryCount = 0;
+    
+    matureContentMonitor = setInterval(() => {
+        if (matureRetryCount >= config.maxMatureRetries) {
+            clearInterval(matureContentMonitor);
+            matureContentMonitor = null;
+            debugLog('⏰ Mature content monitoring timeout - stopping');
+            return;
+        }
+        
+        matureRetryCount++;
+        
+        if (attemptMatureContentBypass()) {
+            clearInterval(matureContentMonitor);
+            matureContentMonitor = null;
+            debugLog('✅ Mature content bypass successful - stopping monitoring');
+        }
+    }, config.matureCheckInterval);
+}
+
+// Stop mature content monitoring
+function stopMatureContentMonitoring() {
+    if (matureContentMonitor) {
+        clearInterval(matureContentMonitor);
+        matureContentMonitor = null;
+        debugLog('🛑 Stopped mature content monitoring');
     }
 }
 
@@ -150,7 +242,11 @@ function refreshStream() {
         try {
             player.pause();
             setTimeout(() => {
-                if (player) player.play();
+                if (player) {
+                    player.play();
+                    // Restart mature content monitoring after refresh
+                    setTimeout(() => startMatureContentMonitoring(), 2000);
+                }
             }, 500);
             updateStatus('Stream refreshed', 'info');
         } catch (e) {
@@ -342,6 +438,9 @@ function initializeTwitchPlayer() {
             updateStatus('Player ready!', 'success');
             if (loadingDiv) loadingDiv.style.display = 'none';
             
+            // Start mature content monitoring after player is ready
+            setTimeout(() => startMatureContentMonitoring(), 1000);
+            
             // Start latency monitoring
             startLatencyMonitoring();
             
@@ -377,6 +476,8 @@ function initializeTwitchPlayer() {
         player.addEventListener(Twitch.Player.PLAYING, function() {
             debugLog('▶️ Stream playing');
             updateStatus('🎮 Playing', 'success');
+            // Stop mature content monitoring once playing
+            stopMatureContentMonitoring();
         });
 
         player.addEventListener(Twitch.Player.PAUSE, function() {
@@ -388,12 +489,14 @@ function initializeTwitchPlayer() {
             debugLog('🏁 Stream ended');
             updateStatus('Stream ended', 'info');
             stopLatencyMonitoring();
+            stopMatureContentMonitoring();
         });
 
         player.addEventListener(Twitch.Player.OFFLINE, function() {
             debugLog('📺 Stream offline');
             updateStatus('📺 Stream offline', 'warning');
             stopLatencyMonitoring();
+            stopMatureContentMonitoring();
         });
 
         // Send ready signal to Unity
@@ -462,6 +565,7 @@ setTimeout(() => {
 // Cleanup on page unload
 window.addEventListener('beforeunload', function() {
     stopLatencyMonitoring();
+    stopMatureContentMonitoring();
     if (player) {
         try {
             player.pause();
@@ -471,5 +575,5 @@ window.addEventListener('beforeunload', function() {
     }
 });
 
-debugLog('🌐 GitHub Pages Twitch embed initialized');
+debugLog('🌐 GitHub Pages Twitch embed initialized with mature content bypass');
 </script></body></html>
