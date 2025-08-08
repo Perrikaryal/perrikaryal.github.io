@@ -46,7 +46,7 @@ html,body{margin:0;height:100%;width:100%;background:#000;font-family:-apple-sys
 </div>
 
 <script>
-console.log('🌐 Twitch GitHub Pages Embed v2.1 - Enhanced with Mature Content Handler');
+console.log('🌐 Twitch GitHub Pages Embed v2.2 - Enhanced with Mature Content Handler');
 console.log('📍 URL:', window.location.href);
 console.log('🖥️ User Agent:', navigator.userAgent);
 
@@ -71,8 +71,8 @@ const config = {
     autoBypassMature: autoBypassMature,
     latencyInterval: 1000,
     latencyTimeout: 5000,
-    matureCheckInterval: 250, // Check more frequently 
-    maxMatureRetries: 60 // Check for 15 seconds instead of 10
+    matureCheckInterval: 100, // Check every 100ms - very aggressive
+    maxMatureRetries: 300 // Check for 30 seconds
 };
 
 console.log('⚙️ Config:', config);
@@ -122,140 +122,142 @@ function attemptMatureContentBypass() {
     if (!config.autoBypassMature) return false;
     
     try {
-        debugLog('🔍 Searching for mature content elements...');
+        debugLog('🔍 Searching for mature content elements... (v2.2)');
+        
+        // First, log the entire DOM structure we can see
+        const bodyChildCount = document.body ? document.body.children.length : 0;
+        const allDivs = document.querySelectorAll('div').length;
+        const allButtons = document.querySelectorAll('button').length;
+        const allIframes = document.querySelectorAll('iframe').length;
+        
+        debugLog(`📊 DOM Stats: ${bodyChildCount} body children, ${allDivs} divs, ${allButtons} buttons, ${allIframes} iframes`);
+        
+        // Check if we're inside an iframe ourselves
+        const isInIframe = window !== window.top;
+        debugLog(`🪟 Running in iframe: ${isInIframe}`);
+        
+        // Try to access the top window if we're in an iframe
+        let searchDocument = document;
+        try {
+            if (isInIframe && window.top && window.top.document) {
+                searchDocument = window.top.document;
+                debugLog('🔍 Searching in parent window document');
+            }
+        } catch (e) {
+            debugLog(`❌ Cannot access parent window: ${e.message}`);
+        }
         
         // Use the EXACT selectors the user provided
         const specificSelectors = [
             '#channel-player-gate > div > div > div.Layout-sc-1xcs6mc-0.dUxMTz > div > button',
             'button[data-a-target="content-classification-gate-overlay-start-watching-button"]',
             '#channel-player-gate button',
-            '[data-a-target="tw-core-button-label-text"]'
+            '#channel-player-gate',
+            '[data-a-target="tw-core-button-label-text"]',
+            '[data-a-target*="start-watching"]',
+            '[data-a-target*="gate-overlay"]',
+            '[data-a-target*="classification"]'
         ];
         
-        // Try each specific selector
-        for (const selector of specificSelectors) {
-            try {
-                const element = document.querySelector(selector);
-                if (element && element.offsetParent !== null) {
-                    const text = (element.textContent || element.innerText || '').trim();
-                    debugLog(`🎯 Found element with selector "${selector}": "${text}"`);
+        // Try each specific selector on both documents
+        const documentsToSearch = [document];
+        if (searchDocument !== document) {
+            documentsToSearch.push(searchDocument);
+        }
+        
+        for (const doc of documentsToSearch) {
+            debugLog(`🔍 Searching in ${doc === document ? 'current' : 'parent'} document`);
+            
+            for (const selector of specificSelectors) {
+                try {
+                    const elements = doc.querySelectorAll(selector);
+                    debugLog(`  Selector "${selector}": found ${elements.length} elements`);
                     
-                    if (text.toLowerCase().includes('start watching') || 
-                        selector.includes('content-classification-gate') ||
-                        selector.includes('tw-core-button-label-text')) {
+                    for (const element of elements) {
+                        const text = (element.textContent || element.innerText || '').trim();
+                        const isVisible = element.offsetParent !== null;
+                        const rect = element.getBoundingClientRect();
+                        const hasSize = rect.width > 0 && rect.height > 0;
                         
-                        debugLog(`✅ Clicking element: ${element.tagName} with text "${text}"`);
-                        element.click();
-                        updateStatus('Auto-clicked Start Watching', 'success');
-                        return true;
+                        debugLog(`    Element: ${element.tagName} - "${text.substring(0, 30)}" - visible: ${isVisible} - hasSize: ${hasSize}`);
+                        
+                        if ((text.toLowerCase().includes('start watching') || 
+                             selector.includes('content-classification-gate') ||
+                             selector.includes('start-watching')) && 
+                            (isVisible || hasSize)) {
+                            
+                            debugLog(`✅ FOUND TARGET! Clicking: ${element.tagName} with text "${text}"`);
+                            element.click();
+                            updateStatus('Auto-clicked Start Watching', 'success');
+                            return true;
+                        }
+                    }
+                } catch (selectorError) {
+                    debugLog(`❌ Selector "${selector}" failed: ${selectorError.message}`);
+                }
+            }
+        }
+        
+        // More aggressive search - look for ANY button with "Start Watching" text
+        for (const doc of documentsToSearch) {
+            const allElements = doc.querySelectorAll('*');
+            let elementsChecked = 0;
+            let buttonsFound = 0;
+            let startWatchingFound = 0;
+            
+            for (const element of allElements) {
+                elementsChecked++;
+                
+                // Skip our own debug elements
+                if (element.closest && (element.closest('.debug-panel') || 
+                    element.closest('.controls') || 
+                    element.closest('.status') ||
+                    element.closest('.latency-display'))) {
+                    continue;
+                }
+                
+                const text = (element.textContent || element.innerText || '').trim();
+                const tagName = element.tagName.toLowerCase();
+                const dataTarget = element.getAttribute('data-a-target') || '';
+                const id = element.id || '';
+                const className = element.className || '';
+                
+                if (tagName === 'button') {
+                    buttonsFound++;
+                    debugLog(`    Button found: "${text.substring(0, 30)}" - data-target: "${dataTarget}"`);
+                }
+                
+                // Look for text containing "start watching"
+                if (text.toLowerCase().includes('start watching')) {
+                    startWatchingFound++;
+                    const isVisible = element.offsetParent !== null;
+                    const rect = element.getBoundingClientRect();
+                    
+                    debugLog(`🎯 "Start Watching" text found in ${tagName}: "${text}" - visible: ${isVisible} - rect: ${rect.width}x${rect.height}`);
+                    
+                    if (isVisible || (rect.width > 0 && rect.height > 0)) {
+                        const clickTarget = element.closest('button') || element;
+                        debugLog(`✅ CLICKING! Target: ${clickTarget.tagName}`);
+                        
+                        try {
+                            clickTarget.click();
+                            updateStatus('Auto-clicked Start Watching', 'success');
+                            return true;
+                        } catch (clickError) {
+                            debugLog(`❌ Click failed: ${clickError.message}`);
+                        }
                     }
                 }
-            } catch (selectorError) {
-                debugLog(`❌ Selector "${selector}" failed: ${selectorError.message}`);
-            }
-        }
-        
-        // Generic fallback search for the channel-player-gate area
-        const gateElement = document.querySelector('#channel-player-gate');
-        if (gateElement) {
-            debugLog('🎯 Found #channel-player-gate element');
-            
-            // Look for any buttons within the gate
-            const buttons = gateElement.querySelectorAll('button');
-            debugLog(`Found ${buttons.length} buttons in #channel-player-gate`);
-            
-            for (const button of buttons) {
-                const text = (button.textContent || button.innerText || '').trim();
-                const dataTarget = button.getAttribute('data-a-target') || '';
                 
-                debugLog(`  Button: "${text}" - data-target: "${dataTarget}"`);
-                
-                if (text.toLowerCase().includes('start watching') || 
-                    dataTarget.includes('start-watching') ||
-                    dataTarget.includes('gate-overlay')) {
-                    
-                    debugLog(`✅ Clicking button: "${text}"`);
-                    button.click();
-                    updateStatus('Auto-clicked Start Watching', 'success');
-                    return true;
-                }
-            }
-        }
-        
-        // Even more generic search - look for ANY element with the specific data-target
-        const allDataTargets = document.querySelectorAll('[data-a-target*="start-watching"], [data-a-target*="gate-overlay"], [data-a-target*="tw-core-button-label-text"]');
-        
-        debugLog(`Found ${allDataTargets.length} elements with relevant data-a-target attributes`);
-        
-        for (const element of allDataTargets) {
-            const text = (element.textContent || element.innerText || '').trim();
-            const dataTarget = element.getAttribute('data-a-target') || '';
-            
-            debugLog(`  Element: ${element.tagName} - "${text}" - data-target: "${dataTarget}"`);
-            
-            if (text.toLowerCase().includes('start watching') && element.offsetParent !== null) {
-                const clickTarget = element.closest('button') || element;
-                debugLog(`✅ Clicking element: "${text}"`);
-                clickTarget.click();
-                updateStatus('Auto-clicked Start Watching', 'success');
-                return true;
-            }
-        }
-        
-        // Ultra-generic fallback - search the entire document
-        const allElements = document.querySelectorAll('*');
-        const foundElements = [];
-        
-        for (const element of allElements) {
-            // Skip our own debug panel and controls
-            if (element.closest('.debug-panel') || 
-                element.closest('.controls') || 
-                element.closest('.status') ||
-                element.closest('.latency-display')) {
-                continue;
-            }
-            
-            const text = (element.textContent || element.innerText || '').trim();
-            const tagName = element.tagName.toLowerCase();
-            const dataTarget = element.getAttribute('data-a-target') || '';
-            
-            // Look for "Start Watching" text specifically
-            if (text.toLowerCase().includes('start watching') && element.offsetParent !== null) {
-                debugLog(`🎯 Found "Start Watching" element: ${tagName}, text: "${text}", data-target: "${dataTarget}"`);
-                
-                const clickTarget = element.closest('button') || element;
-                try {
-                    clickTarget.click();
-                    debugLog(`✅ Successfully clicked "Start Watching" element`);
-                    updateStatus('Auto-clicked Start Watching', 'success');
-                    return true;
-                } catch (clickError) {
-                    debugLog(`❌ Click failed: ${clickError.message}`);
+                // Look for specific IDs or classes
+                if (id.includes('gate') || id.includes('player') || 
+                    className.includes('gate') || className.includes('overlay') ||
+                    dataTarget.includes('gate') || dataTarget.includes('classification')) {
+                    debugLog(`    Interesting element: ${tagName}#${id}.${className} - data-target: "${dataTarget}"`);
                 }
             }
             
-            // Log interesting elements for debugging
-            if ((text.toLowerCase().includes('start') || text.toLowerCase().includes('watching')) ||
-                dataTarget.includes('button') ||
-                dataTarget.includes('gate') ||
-                tagName === 'button') {
-                foundElements.push({
-                    tag: tagName,
-                    text: text.substring(0, 50),
-                    dataTarget: dataTarget,
-                    visible: element.offsetParent !== null
-                });
-            }
-        }
-        
-        // Log what we found for debugging
-        if (foundElements.length > 0) {
-            debugLog(`Found ${foundElements.length} potentially relevant elements:`);
-            foundElements.slice(0, 10).forEach((el, i) => {
-                debugLog(`  ${i+1}. ${el.tag} - "${el.text}" - ${el.dataTarget} - visible: ${el.visible}`);
-            });
-        } else {
-            debugLog('No relevant elements found in document');
+            debugLog(`📊 Search complete: ${elementsChecked} elements, ${buttonsFound} buttons, ${startWatchingFound} "Start Watching" texts`);
         }
         
         return false;
@@ -269,7 +271,7 @@ function attemptMatureContentBypass() {
 function startMatureContentMonitoring() {
     if (!config.autoBypassMature || matureContentMonitor) return;
     
-    debugLog('🔍 Starting mature content monitoring...');
+    debugLog('🔍 Starting aggressive mature content monitoring v2.2...');
     matureRetryCount = 0;
     
     // Set up MutationObserver to watch for dynamically added content
@@ -281,36 +283,13 @@ function startMatureContentMonitoring() {
                 mutation.addedNodes.forEach((node) => {
                     if (node.nodeType === Node.ELEMENT_NODE) {
                         shouldCheck = true;
+                        debugLog(`🔍 MutationObserver: New ${node.tagName} added`);
                         
-                        // Check the added node and all its descendants
-                        const elementsToCheck = [node];
-                        if (node.querySelectorAll) {
-                            elementsToCheck.push(...node.querySelectorAll('*'));
-                        }
-                        
-                        for (const element of elementsToCheck) {
-                            // Skip our own debug elements
-                            if (element.closest && (element.closest('.debug-panel') || 
-                                element.closest('.controls') || 
-                                element.closest('.status') ||
-                                element.closest('.latency-display'))) {
-                                continue;
-                            }
-                            
-                            const text = (element.textContent || element.innerText || '').trim();
-                            if (text.toLowerCase().includes('start watching') && element.offsetParent !== null) {
-                                debugLog(`🎯 MutationObserver found "Start Watching": ${element.tagName} - "${text}"`);
-                                
-                                const clickTarget = element.closest('button') || element;
-                                try {
-                                    clickTarget.click();
-                                    updateStatus('Auto-clicked Start Watching (MutationObserver)', 'success');
-                                    stopMatureContentMonitoring();
-                                    return;
-                                } catch (e) {
-                                    debugLog(`❌ MutationObserver click failed: ${e.message}`);
-                                }
-                            }
+                        // Check the added node immediately
+                        const text = (node.textContent || node.innerText || '').trim();
+                        if (text.toLowerCase().includes('start watching')) {
+                            debugLog(`🎯 MutationObserver found "Start Watching" immediately!`);
+                            setTimeout(() => attemptMatureContentBypass(), 50);
                         }
                     }
                 });
@@ -320,6 +299,7 @@ function startMatureContentMonitoring() {
         // If we detected changes, do a full scan
         if (shouldCheck) {
             setTimeout(() => {
+                debugLog('🔍 MutationObserver triggered full scan');
                 if (attemptMatureContentBypass()) {
                     stopMatureContentMonitoring();
                 }
@@ -330,13 +310,46 @@ function startMatureContentMonitoring() {
     // Start observing the document with the configured parameters
     observer.observe(document.body, {
         childList: true,
-        subtree: true
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['class', 'id', 'data-a-target']
     });
+    
+    // Also observe the entire document if possible
+    try {
+        if (window.top && window.top.document && window.top.document !== document) {
+            const topObserver = new MutationObserver((mutations) => {
+                mutations.forEach((mutation) => {
+                    if (mutation.type === 'childList') {
+                        mutation.addedNodes.forEach((node) => {
+                            if (node.nodeType === Node.ELEMENT_NODE) {
+                                const text = (node.textContent || node.innerText || '').trim();
+                                if (text.toLowerCase().includes('start watching')) {
+                                    debugLog(`🎯 Top-level MutationObserver found "Start Watching"!`);
+                                    setTimeout(() => attemptMatureContentBypass(), 50);
+                                }
+                            }
+                        });
+                    }
+                });
+            });
+            
+            topObserver.observe(window.top.document.body, {
+                childList: true,
+                subtree: true
+            });
+            
+            window.topMatureContentObserver = topObserver;
+            debugLog('🔍 Also monitoring top-level document');
+        }
+    } catch (e) {
+        debugLog(`❌ Cannot monitor top-level document: ${e.message}`);
+    }
     
     // Store observer for cleanup
     window.matureContentObserver = observer;
     
-    // Periodic check as fallback
+    // Very aggressive periodic check as fallback
     matureContentMonitor = setInterval(() => {
         if (matureRetryCount >= config.maxMatureRetries) {
             clearInterval(matureContentMonitor);
@@ -345,11 +358,20 @@ function startMatureContentMonitoring() {
                 window.matureContentObserver.disconnect();
                 window.matureContentObserver = null;
             }
+            if (window.topMatureContentObserver) {
+                window.topMatureContentObserver.disconnect();
+                window.topMatureContentObserver = null;
+            }
             debugLog('⏰ Mature content monitoring timeout - stopping');
             return;
         }
         
         matureRetryCount++;
+        
+        // Log progress every 50 attempts (5 seconds)
+        if (matureRetryCount % 50 === 0) {
+            debugLog(`🔍 Mature content monitoring: attempt ${matureRetryCount}/${config.maxMatureRetries}`);
+        }
         
         if (attemptMatureContentBypass()) {
             clearInterval(matureContentMonitor);
@@ -357,6 +379,10 @@ function startMatureContentMonitoring() {
             if (window.matureContentObserver) {
                 window.matureContentObserver.disconnect();
                 window.matureContentObserver = null;
+            }
+            if (window.topMatureContentObserver) {
+                window.topMatureContentObserver.disconnect();
+                window.topMatureContentObserver = null;
             }
             debugLog('✅ Mature content bypass successful - stopping monitoring');
         }
@@ -375,6 +401,12 @@ function stopMatureContentMonitoring() {
         window.matureContentObserver.disconnect();
         window.matureContentObserver = null;
         debugLog('🛑 Stopped MutationObserver');
+    }
+    
+    if (window.topMatureContentObserver) {
+        window.topMatureContentObserver.disconnect();
+        window.topMatureContentObserver = null;
+        debugLog('🛑 Stopped top-level MutationObserver');
     }
 }
 
@@ -762,5 +794,5 @@ window.addEventListener('beforeunload', function() {
     }
 });
 
-debugLog('🌐 GitHub Pages Twitch embed initialized with mature content bypass v2.1');
+debugLog('🌐 GitHub Pages Twitch embed initialized with mature content bypass v2.2');
 </script></body></html>
