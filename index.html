@@ -121,52 +121,109 @@ function attemptMatureContentBypass() {
     if (!config.autoBypassMature) return false;
     
     try {
-        // First try to find the button in the main document (not iframe)
-        // Target the specific element the user identified
-        const targetSelectors = [
-            'div[data-a-target="tw-core-button-label-text"]', // User's specific element
-            'button[data-a-target="player-overlay-mature-accept"]',
-            '[data-a-target*="mature"]',
-            '[data-a-target*="gate"]',
-            'button[aria-label="Start Watching"]',
-            '.mature-content-overlay button',
-            '.content-overlay-gate button'
-        ];
+        debugLog('🔍 Searching for "Start Watching" elements...');
         
-        // Search in main document first
-        for (const selector of targetSelectors) {
-            const elements = document.querySelectorAll(selector);
-            for (const element of elements) {
-                if (element && element.offsetParent !== null) { // Check if visible
-                    const text = element.textContent || element.innerText || '';
-                    if (text.toLowerCase().includes('start watching') || 
-                        text.toLowerCase().includes('continue') ||
-                        selector.includes('mature')) {
-                        debugLog(`🎯 Found mature content element (main doc): ${selector} - "${text}"`);
-                        
-                        // Try clicking the element or its parent button
-                        const clickTarget = element.closest('button') || element;
-                        clickTarget.click();
-                        updateStatus('Auto-clicked Start Watching', 'success');
+        // Get ALL elements in the document
+        const allElements = document.querySelectorAll('*');
+        debugLog(`📋 Scanning ${allElements.length} total elements...`);
+        
+        // Look through every single element for "Start Watching" text
+        for (let i = 0; i < allElements.length; i++) {
+            const element = allElements[i];
+            const text = (element.textContent || element.innerText || '').trim();
+            
+            // Check if this element contains "Start Watching"
+            if (text.toLowerCase().includes('start watching')) {
+                debugLog(`🎯 Found element with "Start Watching": ${element.tagName} - "${text}"`);
+                debugLog(`   Element classes: ${element.className}`);
+                debugLog(`   Element data attributes: ${JSON.stringify(element.dataset)}`);
+                
+                // Try to click this element
+                if (element.offsetParent !== null) { // Make sure it's visible
+                    try {
+                        debugLog(`   👆 Attempting to click element directly...`);
+                        element.click();
+                        updateStatus('Auto-clicked Start Watching (direct)', 'success');
                         return true;
+                    } catch (e) {
+                        debugLog(`   ❌ Direct click failed: ${e.message}`);
+                    }
+                    
+                    // Try to click parent button
+                    const parentButton = element.closest('button');
+                    if (parentButton) {
+                        try {
+                            debugLog(`   👆 Attempting to click parent button...`);
+                            parentButton.click();
+                            updateStatus('Auto-clicked Start Watching (parent)', 'success');
+                            return true;
+                        } catch (e) {
+                            debugLog(`   ❌ Parent button click failed: ${e.message}`);
+                        }
+                    }
+                    
+                    // Try to click parent div or any clickable parent
+                    const clickableParent = element.closest('[onclick], [role="button"], .clickable, [tabindex]');
+                    if (clickableParent) {
+                        try {
+                            debugLog(`   👆 Attempting to click clickable parent...`);
+                            clickableParent.click();
+                            updateStatus('Auto-clicked Start Watching (clickable parent)', 'success');
+                            return true;
+                        } catch (e) {
+                            debugLog(`   ❌ Clickable parent click failed: ${e.message}`);
+                        }
+                    }
+                    
+                    // Last resort: dispatch mouse events
+                    try {
+                        debugLog(`   👆 Attempting to dispatch mouse events...`);
+                        const clickEvent = new MouseEvent('click', {
+                            view: window,
+                            bubbles: true,
+                            cancelable: true
+                        });
+                        element.dispatchEvent(clickEvent);
+                        updateStatus('Auto-clicked Start Watching (event)', 'success');
+                        return true;
+                    } catch (e) {
+                        debugLog(`   ❌ Mouse event dispatch failed: ${e.message}`);
                     }
                 }
             }
         }
         
-        // Fallback: Look for any element containing "Start Watching" text
-        const allElements = document.querySelectorAll('*');
-        for (const element of allElements) {
-            const text = element.textContent || element.innerText || '';
-            if (text.trim().toLowerCase() === 'start watching' && element.offsetParent !== null) {
-                debugLog(`🎯 Found "Start Watching" element by text search: ${element.tagName}`);
-                const clickTarget = element.closest('button') || element;
-                clickTarget.click();
-                updateStatus('Auto-clicked Start Watching', 'success');
-                return true;
+        // Also check for common button selectors that might not have visible text
+        const buttonSelectors = [
+            'button',
+            '[role="button"]',
+            '.button',
+            '[onclick]',
+            '[data-a-target*="button"]',
+            '[data-a-target*="mature"]',
+            '[data-a-target*="gate"]'
+        ];
+        
+        for (const selector of buttonSelectors) {
+            const buttons = document.querySelectorAll(selector);
+            for (const button of buttons) {
+                const text = (button.textContent || button.innerText || button.getAttribute('aria-label') || '').trim();
+                if (text.toLowerCase().includes('start') || text.toLowerCase().includes('watching') || text.toLowerCase().includes('continue')) {
+                    debugLog(`🎯 Found potential button: ${selector} - "${text}"`);
+                    if (button.offsetParent !== null) {
+                        try {
+                            button.click();
+                            updateStatus('Auto-clicked potential button', 'success');
+                            return true;
+                        } catch (e) {
+                            debugLog(`   ❌ Button click failed: ${e.message}`);
+                        }
+                    }
+                }
             }
         }
         
+        debugLog('❌ No "Start Watching" elements found');
         return false;
     } catch (e) {
         debugLog(`❌ Mature content bypass error: ${e.message}`);
