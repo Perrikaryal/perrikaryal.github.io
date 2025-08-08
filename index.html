@@ -124,7 +124,85 @@ function attemptMatureContentBypass() {
     try {
         debugLog('🔍 Searching for mature content elements...');
         
-        // Get all elements in the document
+        // Use the EXACT selectors the user provided
+        const specificSelectors = [
+            '#channel-player-gate > div > div > div.Layout-sc-1xcs6mc-0.dUxMTz > div > button',
+            'button[data-a-target="content-classification-gate-overlay-start-watching-button"]',
+            '#channel-player-gate button',
+            '[data-a-target="tw-core-button-label-text"]'
+        ];
+        
+        // Try each specific selector
+        for (const selector of specificSelectors) {
+            try {
+                const element = document.querySelector(selector);
+                if (element && element.offsetParent !== null) {
+                    const text = (element.textContent || element.innerText || '').trim();
+                    debugLog(`🎯 Found element with selector "${selector}": "${text}"`);
+                    
+                    if (text.toLowerCase().includes('start watching') || 
+                        selector.includes('content-classification-gate') ||
+                        selector.includes('tw-core-button-label-text')) {
+                        
+                        debugLog(`✅ Clicking element: ${element.tagName} with text "${text}"`);
+                        element.click();
+                        updateStatus('Auto-clicked Start Watching', 'success');
+                        return true;
+                    }
+                }
+            } catch (selectorError) {
+                debugLog(`❌ Selector "${selector}" failed: ${selectorError.message}`);
+            }
+        }
+        
+        // Generic fallback search for the channel-player-gate area
+        const gateElement = document.querySelector('#channel-player-gate');
+        if (gateElement) {
+            debugLog('🎯 Found #channel-player-gate element');
+            
+            // Look for any buttons within the gate
+            const buttons = gateElement.querySelectorAll('button');
+            debugLog(`Found ${buttons.length} buttons in #channel-player-gate`);
+            
+            for (const button of buttons) {
+                const text = (button.textContent || button.innerText || '').trim();
+                const dataTarget = button.getAttribute('data-a-target') || '';
+                
+                debugLog(`  Button: "${text}" - data-target: "${dataTarget}"`);
+                
+                if (text.toLowerCase().includes('start watching') || 
+                    dataTarget.includes('start-watching') ||
+                    dataTarget.includes('gate-overlay')) {
+                    
+                    debugLog(`✅ Clicking button: "${text}"`);
+                    button.click();
+                    updateStatus('Auto-clicked Start Watching', 'success');
+                    return true;
+                }
+            }
+        }
+        
+        // Even more generic search - look for ANY element with the specific data-target
+        const allDataTargets = document.querySelectorAll('[data-a-target*="start-watching"], [data-a-target*="gate-overlay"], [data-a-target*="tw-core-button-label-text"]');
+        
+        debugLog(`Found ${allDataTargets.length} elements with relevant data-a-target attributes`);
+        
+        for (const element of allDataTargets) {
+            const text = (element.textContent || element.innerText || '').trim();
+            const dataTarget = element.getAttribute('data-a-target') || '';
+            
+            debugLog(`  Element: ${element.tagName} - "${text}" - data-target: "${dataTarget}"`);
+            
+            if (text.toLowerCase().includes('start watching') && element.offsetParent !== null) {
+                const clickTarget = element.closest('button') || element;
+                debugLog(`✅ Clicking element: "${text}"`);
+                clickTarget.click();
+                updateStatus('Auto-clicked Start Watching', 'success');
+                return true;
+            }
+        }
+        
+        // Ultra-generic fallback - search the entire document
         const allElements = document.querySelectorAll('*');
         const foundElements = [];
         
@@ -141,41 +219,11 @@ function attemptMatureContentBypass() {
             const tagName = element.tagName.toLowerCase();
             const dataTarget = element.getAttribute('data-a-target') || '';
             
-            // Log interesting elements for debugging
-            if (text.toLowerCase().includes('start') || 
-                text.toLowerCase().includes('watching') ||
-                dataTarget.includes('button') ||
-                dataTarget.includes('mature') ||
-                tagName === 'button') {
-                foundElements.push({
-                    tag: tagName,
-                    text: text.substring(0, 50),
-                    dataTarget: dataTarget,
-                    visible: element.offsetParent !== null
-                });
-            }
-            
-            // Look for "Start Watching" text anywhere
+            // Look for "Start Watching" text specifically
             if (text.toLowerCase().includes('start watching') && element.offsetParent !== null) {
                 debugLog(`🎯 Found "Start Watching" element: ${tagName}, text: "${text}", data-target: "${dataTarget}"`);
                 
-                // Try to click it or find a clickable parent
-                let clickTarget = element;
-                
-                // If it's not a button, look for a button parent
-                if (tagName !== 'button') {
-                    const buttonParent = element.closest('button');
-                    if (buttonParent) {
-                        clickTarget = buttonParent;
-                        debugLog(`🎯 Using button parent for clicking`);
-                    } else {
-                        // Make it clickable if it's not
-                        element.style.cursor = 'pointer';
-                        clickTarget = element;
-                        debugLog(`🎯 Making element clickable directly`);
-                    }
-                }
-                
+                const clickTarget = element.closest('button') || element;
                 try {
                     clickTarget.click();
                     debugLog(`✅ Successfully clicked "Start Watching" element`);
@@ -185,16 +233,29 @@ function attemptMatureContentBypass() {
                     debugLog(`❌ Click failed: ${clickError.message}`);
                 }
             }
+            
+            // Log interesting elements for debugging
+            if ((text.toLowerCase().includes('start') || text.toLowerCase().includes('watching')) ||
+                dataTarget.includes('button') ||
+                dataTarget.includes('gate') ||
+                tagName === 'button') {
+                foundElements.push({
+                    tag: tagName,
+                    text: text.substring(0, 50),
+                    dataTarget: dataTarget,
+                    visible: element.offsetParent !== null
+                });
+            }
         }
         
         // Log what we found for debugging
         if (foundElements.length > 0) {
             debugLog(`Found ${foundElements.length} potentially relevant elements:`);
-            foundElements.slice(0, 5).forEach((el, i) => {
+            foundElements.slice(0, 10).forEach((el, i) => {
                 debugLog(`  ${i+1}. ${el.tag} - "${el.text}" - ${el.dataTarget} - visible: ${el.visible}`);
             });
         } else {
-            debugLog('No relevant elements found in this scan');
+            debugLog('No relevant elements found in document');
         }
         
         return false;
