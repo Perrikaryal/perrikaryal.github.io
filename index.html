@@ -121,41 +121,47 @@ function attemptMatureContentBypass() {
     if (!config.autoBypassMature) return false;
     
     try {
-        // Look for the Twitch player iframe
-        const iframe = document.querySelector('#twitch iframe');
-        if (!iframe) return false;
-        
-        const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
-        if (!iframeDoc) return false;
-        
-        // Common selectors for the "Start Watching" button
-        const possibleSelectors = [
+        // First try to find the button in the main document (not iframe)
+        // Target the specific element the user identified
+        const targetSelectors = [
+            'div[data-a-target="tw-core-button-label-text"]', // User's specific element
             'button[data-a-target="player-overlay-mature-accept"]',
+            '[data-a-target*="mature"]',
+            '[data-a-target*="gate"]',
             'button[aria-label="Start Watching"]',
             '.mature-content-overlay button',
-            '.content-overlay-gate button',
-            'button:contains("Start Watching")',
-            'button[data-test-selector="mature-content-gate-button"]'
+            '.content-overlay-gate button'
         ];
         
-        for (const selector of possibleSelectors) {
-            const button = iframeDoc.querySelector(selector);
-            if (button && button.offsetParent !== null) { // Check if visible
-                debugLog(`🎯 Found mature content button with selector: ${selector}`);
-                button.click();
-                updateStatus('Auto-clicked Start Watching', 'success');
-                return true;
+        // Search in main document first
+        for (const selector of targetSelectors) {
+            const elements = document.querySelectorAll(selector);
+            for (const element of elements) {
+                if (element && element.offsetParent !== null) { // Check if visible
+                    const text = element.textContent || element.innerText || '';
+                    if (text.toLowerCase().includes('start watching') || 
+                        text.toLowerCase().includes('continue') ||
+                        selector.includes('mature')) {
+                        debugLog(`🎯 Found mature content element (main doc): ${selector} - "${text}"`);
+                        
+                        // Try clicking the element or its parent button
+                        const clickTarget = element.closest('button') || element;
+                        clickTarget.click();
+                        updateStatus('Auto-clicked Start Watching', 'success');
+                        return true;
+                    }
+                }
             }
         }
         
-        // Alternative approach: look for any button containing "Start Watching" text
-        const allButtons = iframeDoc.querySelectorAll('button');
-        for (const button of allButtons) {
-            if (button.textContent && 
-                (button.textContent.toLowerCase().includes('start watching') ||
-                 button.textContent.toLowerCase().includes('continue'))) {
-                debugLog(`🎯 Found mature content button by text: "${button.textContent}"`);
-                button.click();
+        // Fallback: Look for any element containing "Start Watching" text
+        const allElements = document.querySelectorAll('*');
+        for (const element of allElements) {
+            const text = element.textContent || element.innerText || '';
+            if (text.trim().toLowerCase() === 'start watching' && element.offsetParent !== null) {
+                debugLog(`🎯 Found "Start Watching" element by text search: ${element.tagName}`);
+                const clickTarget = element.closest('button') || element;
+                clickTarget.click();
                 updateStatus('Auto-clicked Start Watching', 'success');
                 return true;
             }
@@ -175,10 +181,51 @@ function startMatureContentMonitoring() {
     debugLog('🔍 Starting mature content monitoring...');
     matureRetryCount = 0;
     
+    // Set up MutationObserver to watch for dynamically added content
+    const observer = new MutationObserver((mutations) => {
+        mutations.forEach((mutation) => {
+            if (mutation.type === 'childList') {
+                mutation.addedNodes.forEach((node) => {
+                    if (node.nodeType === Node.ELEMENT_NODE) {
+                        // Check if this node or its children contain mature content elements
+                        const element = node;
+                        const matureElements = element.querySelectorAll ? element.querySelectorAll('[data-a-target*="tw-core-button-label-text"], [data-a-target*="mature"], button') : [];
+                        
+                        for (const el of matureElements) {
+                            const text = el.textContent || el.innerText || '';
+                            if (text.toLowerCase().includes('start watching')) {
+                                debugLog(`🎯 MutationObserver found mature content button: "${text}"`);
+                                const clickTarget = el.closest('button') || el;
+                                clickTarget.click();
+                                updateStatus('Auto-clicked Start Watching (MutationObserver)', 'success');
+                                stopMatureContentMonitoring();
+                                return;
+                            }
+                        }
+                    }
+                });
+            }
+        });
+    });
+    
+    // Start observing the document with the configured parameters
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true
+    });
+    
+    // Store observer for cleanup
+    window.matureContentObserver = observer;
+    
+    // Periodic check as fallback
     matureContentMonitor = setInterval(() => {
         if (matureRetryCount >= config.maxMatureRetries) {
             clearInterval(matureContentMonitor);
             matureContentMonitor = null;
+            if (window.matureContentObserver) {
+                window.matureContentObserver.disconnect();
+                window.matureContentObserver = null;
+            }
             debugLog('⏰ Mature content monitoring timeout - stopping');
             return;
         }
@@ -188,6 +235,10 @@ function startMatureContentMonitoring() {
         if (attemptMatureContentBypass()) {
             clearInterval(matureContentMonitor);
             matureContentMonitor = null;
+            if (window.matureContentObserver) {
+                window.matureContentObserver.disconnect();
+                window.matureContentObserver = null;
+            }
             debugLog('✅ Mature content bypass successful - stopping monitoring');
         }
     }, config.matureCheckInterval);
@@ -199,6 +250,12 @@ function stopMatureContentMonitoring() {
         clearInterval(matureContentMonitor);
         matureContentMonitor = null;
         debugLog('🛑 Stopped mature content monitoring');
+    }
+    
+    if (window.matureContentObserver) {
+        window.matureContentObserver.disconnect();
+        window.matureContentObserver = null;
+        debugLog('🛑 Stopped MutationObserver');
     }
 }
 
