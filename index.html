@@ -46,7 +46,7 @@ html,body{margin:0;height:100%;width:100%;background:#000;font-family:-apple-sys
 </div>
 
 <script>
-console.log('🌐 Twitch GitHub Pages Embed v2.4 - Reduced Logging + Iframe Focus');
+console.log('🌐 Twitch GitHub Pages Embed v2.6 - Smart Detection + Tab Tab Enter');
 console.log('📍 URL:', window.location.href);
 console.log('🖥️ User Agent:', navigator.userAgent);
 
@@ -118,113 +118,134 @@ function updateStatus(msg, type = '') {
     }
 }
 
-// Mature content bypass function
-function attemptMatureContentBypass() {
+// Mature content detection and bypass function
+function detectAndBypassMatureContent() {
     if (!config.autoBypassMature) return false;
     
     try {
-        debugLog('🔍 Attempting mature content bypass (v2.4)');
+        debugLog('🔍 Checking if mature content warning is present...');
         
-        // Check for iframe - this is where the mature content is
         const twitchIframe = document.querySelector('#twitch iframe') || document.querySelector('iframe');
-        
         if (!twitchIframe) {
             debugLog('❌ No iframe found');
             return false;
         }
         
-        debugLog('🎯 Found Twitch iframe - attempting interactions...');
-        
-        // Method 1: Try direct iframe access (will likely fail due to CORS)
-        let directAccessWorked = false;
-        try {
-            const iframeDoc = twitchIframe.contentDocument || twitchIframe.contentWindow.document;
-            if (iframeDoc) {
-                const targetButton = iframeDoc.querySelector('button[data-a-target="content-classification-gate-overlay-start-watching-button"]') ||
-                                   iframeDoc.querySelector('#channel-player-gate button') ||
-                                   iframeDoc.querySelector('[data-a-target="tw-core-button-label-text"]');
+        // Method 1: Check player state
+        let playerIndicatesMatureWarning = false;
+        if (player && playerReady) {
+            try {
+                const isPaused = player.isPaused();
+                const isEnded = player.getEnded();
                 
-                if (targetButton) {
-                    debugLog('✅ Found button in iframe - clicking directly!');
-                    targetButton.click();
-                    updateStatus('Clicked via direct access', 'success');
-                    return true;
+                // If autoplay is enabled but player is paused (and not ended), likely mature content warning
+                if (config.autoplay && isPaused && !isEnded) {
+                    playerIndicatesMatureWarning = true;
+                    debugLog('🎯 Player state suggests mature content warning (autoplay enabled but paused)');
                 }
-                directAccessWorked = true;
+            } catch (e) {
+                // Player state check failed, continue with other methods
             }
-        } catch (e) {
-            // Expected CORS error - continue with other methods
         }
         
-        if (directAccessWorked) {
-            debugLog('ℹ️ Can access iframe but no mature content button found');
-        }
-        
-        // Method 2: PostMessage to iframe
-        try {
-            twitchIframe.contentWindow.postMessage({
-                type: 'BYPASS_MATURE_CONTENT',
-                selectors: [
-                    'button[data-a-target="content-classification-gate-overlay-start-watching-button"]',
-                    '#channel-player-gate > div > div > div.Layout-sc-1xcs6mc-0.dUxMTz > div > button',
-                    '[data-a-target="tw-core-button-label-text"]'
-                ]
-            }, '*');
-        } catch (e) {
-            // Silent fail
-        }
-        
-        // Method 3: Strategic iframe clicking
+        // Method 2: Check iframe dimensions/visibility changes
         const rect = twitchIframe.getBoundingClientRect();
-        const clickTargets = [
-            { x: rect.left + rect.width * 0.5, y: rect.top + rect.height * 0.65, name: 'center-lower' },
-            { x: rect.left + rect.width * 0.5, y: rect.top + rect.height * 0.7, name: 'bottom-center' }
-        ];
+        const iframeVisible = rect.width > 0 && rect.height > 0;
         
-        clickTargets.forEach(target => {
-            // Multiple click events for better coverage
-            ['mousedown', 'mouseup', 'click'].forEach(eventType => {
-                const event = new MouseEvent(eventType, {
-                    clientX: target.x,
-                    clientY: target.y,
-                    bubbles: true,
-                    cancelable: true,
-                    view: window
-                });
-                twitchIframe.dispatchEvent(event);
-            });
-        });
+        // Method 3: Time-based detection - mature warnings usually appear within first few seconds
+        const timeSincePlayerReady = Date.now() - (window.playerReadyTime || Date.now());
+        const withinWarningWindow = timeSincePlayerReady < 10000; // 10 seconds
         
-        // Method 4: Keyboard events
-        twitchIframe.focus();
-        setTimeout(() => {
-            [13, 32].forEach(keyCode => { // Enter and Space
-                const event = new KeyboardEvent('keydown', {
-                    keyCode: keyCode,
-                    bubbles: true,
-                    cancelable: true
-                });
-                twitchIframe.dispatchEvent(event);
-            });
-        }, 100);
+        debugLog(`📊 Detection: playerPaused=${playerIndicatesMatureWarning}, iframeVisible=${iframeVisible}, timeWindow=${withinWarningWindow}`);
         
-        debugLog('✅ Completed all iframe interaction attempts');
-        return true;
+        // Only proceed if we have good reason to believe warning is present
+        if (playerIndicatesMatureWarning || (withinWarningWindow && iframeVisible)) {
+            debugLog('✅ Mature content warning likely present - executing Tab+Tab+Enter sequence');
+            
+            // Focus the iframe first
+            twitchIframe.focus();
+            
+            // Execute the exact sequence you confirmed works: Tab, Tab, Enter
+            setTimeout(() => {
+                // First Tab
+                sendKeyToIframe(twitchIframe, 'Tab', 9);
+                debugLog('⌨️ Sent: Tab (1/3)');
+                
+                setTimeout(() => {
+                    // Second Tab  
+                    sendKeyToIframe(twitchIframe, 'Tab', 9);
+                    debugLog('⌨️ Sent: Tab (2/3)');
+                    
+                    setTimeout(() => {
+                        // Enter
+                        sendKeyToIframe(twitchIframe, 'Enter', 13);
+                        debugLog('⌨️ Sent: Enter (3/3) - sequence complete!');
+                        
+                        // Check if it worked after a delay
+                        setTimeout(() => {
+                            if (player && playerReady) {
+                                try {
+                                    if (!player.isPaused()) {
+                                        debugLog('🎵 SUCCESS! Player is now playing - mature content bypassed!');
+                                        updateStatus('🎵 Mature content bypassed!', 'success');
+                                        return true;
+                                    } else {
+                                        debugLog('⚠️ Player still paused - bypass may not have worked');
+                                    }
+                                } catch (e) {
+                                    // Silent check
+                                }
+                            }
+                        }, 1000);
+                        
+                    }, 200); // 200ms between Tab and Enter
+                }, 200); // 200ms between first and second Tab
+            }, 100); // 100ms delay before starting sequence
+            
+            updateStatus('🎯 Executing Tab+Tab+Enter', 'info');
+            return true;
+        } else {
+            debugLog('ℹ️ No indication of mature content warning present');
+            return false;
+        }
         
     } catch (e) {
-        debugLog(`❌ Bypass error: ${e.message}`);
+        debugLog(`❌ Detection error: ${e.message}`);
         return false;
     }
+}
+
+// Helper function to send keyboard events to iframe
+function sendKeyToIframe(iframe, key, keyCode) {
+    const events = ['keydown', 'keypress', 'keyup'];
+    
+    events.forEach(eventType => {
+        const event = new KeyboardEvent(eventType, {
+            key: key,
+            keyCode: keyCode,
+            which: keyCode,
+            bubbles: true,
+            cancelable: true
+        });
+        
+        // Send to iframe
+        iframe.dispatchEvent(event);
+        
+        // Also send to currently focused element as backup
+        if (document.activeElement) {
+            document.activeElement.dispatchEvent(event);
+        }
+    });
 }
 
 // Start monitoring for mature content warnings
 function startMatureContentMonitoring() {
     if (!config.autoBypassMature || matureContentMonitor) return;
     
-    debugLog('🔍 Starting mature content monitoring v2.4 (reduced logging)');
+    debugLog('🔍 Starting smart mature content detection v2.6');
     matureRetryCount = 0;
     
-    // Set up MutationObserver - less verbose
+    // Set up MutationObserver for iframe changes
     const observer = new MutationObserver((mutations) => {
         let shouldCheck = false;
         
@@ -236,10 +257,10 @@ function startMatureContentMonitoring() {
         
         if (shouldCheck) {
             setTimeout(() => {
-                if (attemptMatureContentBypass()) {
+                if (detectAndBypassMatureContent()) {
                     stopMatureContentMonitoring();
                 }
-            }, 100);
+            }, 500); // Give iframe time to fully load
         }
     });
     
@@ -250,7 +271,7 @@ function startMatureContentMonitoring() {
     
     window.matureContentObserver = observer;
     
-    // Less aggressive periodic check
+    // Smart periodic check - only when likely needed
     matureContentMonitor = setInterval(() => {
         if (matureRetryCount >= config.maxMatureRetries) {
             clearInterval(matureContentMonitor);
@@ -259,25 +280,39 @@ function startMatureContentMonitoring() {
                 window.matureContentObserver.disconnect();
                 window.matureContentObserver = null;
             }
-            debugLog('⏰ Mature content monitoring timeout');
+            debugLog('⏰ Mature content monitoring completed');
             return;
         }
         
         matureRetryCount++;
         
-        // Only log every 10 attempts (5 seconds) instead of spamming
-        if (matureRetryCount % 10 === 0) {
-            debugLog(`🔍 Monitoring: ${matureRetryCount}/${config.maxMatureRetries}`);
+        // Only check when conditions suggest mature content warning might be present
+        if (player && playerReady) {
+            try {
+                const isPaused = player.isPaused();
+                const timeSinceReady = Date.now() - (window.playerReadyTime || Date.now());
+                
+                // Check if player should be playing but isn't (within first 10 seconds)
+                if (config.autoplay && isPaused && timeSinceReady < 10000) {
+                    if (detectAndBypassMatureContent()) {
+                        clearInterval(matureContentMonitor);
+                        matureContentMonitor = null;
+                        if (window.matureContentObserver) {
+                            window.matureContentObserver.disconnect();
+                            window.matureContentObserver = null;
+                        }
+                        debugLog('✅ Mature content successfully bypassed!');
+                        return;
+                    }
+                }
+            } catch (e) {
+                // Silent check
+            }
         }
         
-        if (attemptMatureContentBypass()) {
-            clearInterval(matureContentMonitor);
-            matureContentMonitor = null;
-            if (window.matureContentObserver) {
-                window.matureContentObserver.disconnect();
-                window.matureContentObserver = null;
-            }
-            debugLog('✅ Mature content bypass successful!');
+        // Log progress less frequently
+        if (matureRetryCount % 20 === 0) {
+            debugLog(`🔍 Smart monitoring: ${matureRetryCount}/${config.maxMatureRetries}`);
         }
     }, config.matureCheckInterval);
 }
@@ -358,13 +393,13 @@ function refreshStream() {
 }
 
 function manualMatureBypass() {
-    debugLog('🎬 Manual mature content bypass triggered...');
-    updateStatus('🎬 Attempting bypass...', 'info');
+    debugLog('🎬 Manual mature content detection triggered...');
+    updateStatus('🎬 Checking for warning...', 'info');
     
-    if (attemptMatureContentBypass()) {
-        updateStatus('🎬 Bypass completed!', 'success');
+    if (detectAndBypassMatureContent()) {
+        updateStatus('🎬 Tab+Tab+Enter sent!', 'success');
     } else {
-        updateStatus('🎬 No iframe found', 'warning');
+        updateStatus('🎬 No warning detected', 'warning');
     }
 }
 
@@ -562,16 +597,17 @@ function initializeTwitchPlayer() {
         player.addEventListener(Twitch.Player.READY, function() {
             debugLog('🎉 Twitch player ready!');
             playerReady = true;
+            window.playerReadyTime = Date.now(); // Track when player became ready
             updateStatus('Player ready!', 'success');
             if (loadingDiv) loadingDiv.style.display = 'none';
             
-            // Start mature content monitoring immediately when player is ready
+            // Start smart mature content detection immediately when player is ready
             startMatureContentMonitoring();
             
             // Start latency monitoring
             startLatencyMonitoring();
             
-            // Set initial quality after a delay
+            // Set initial quality after a delay, and check if mature content is blocking
             setTimeout(() => {
                 try {
                     const qualities = player.getQualities();
@@ -592,6 +628,15 @@ function initializeTwitchPlayer() {
                             toggleLatencyDisplay();
                             toggleDebugPanel();
                         }
+                        
+                        // Additional check: if autoplay is enabled but player is still paused after 3 seconds,
+                        // there might be a mature content warning
+                        setTimeout(() => {
+                            if (config.autoplay && player.isPaused()) {
+                                debugLog('🔍 Player should be playing but is paused - checking for mature content warning');
+                                detectAndBypassMatureContent();
+                            }
+                        }, 3000);
                     }
                 } catch (e) {
                     debugLog(`Quality setting error: ${e.message}`);
@@ -702,5 +747,5 @@ window.addEventListener('beforeunload', function() {
     }
 });
 
-debugLog('🌐 GitHub Pages Twitch embed initialized with mature content bypass v2.4');
+debugLog('🌐 GitHub Pages Twitch embed initialized with mature content bypass v2.6');
 </script></body></html>
