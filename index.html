@@ -38,6 +38,7 @@ html,body{margin:0;height:100%;width:100%;background:#000;font-family:-apple-sys
   <button class="btn" onclick="toggleLatencyDisplay()">📊</button>
   <button class="btn" onclick="toggleDebugPanel()">🔧</button>
   <button class="btn" onclick="refreshStream()">🔄</button>
+  <button class="btn" onclick="manualMatureBypass()">🎬</button>
 </div>
 
 <div id="debug" class="debug-panel">
@@ -70,8 +71,8 @@ const config = {
     autoBypassMature: autoBypassMature,
     latencyInterval: 1000,
     latencyTimeout: 5000,
-    matureCheckInterval: 500,
-    maxMatureRetries: 20
+    matureCheckInterval: 250, // Check more frequently 
+    maxMatureRetries: 60 // Check for 15 seconds instead of 10
 };
 
 console.log('⚙️ Config:', config);
@@ -121,109 +122,81 @@ function attemptMatureContentBypass() {
     if (!config.autoBypassMature) return false;
     
     try {
-        debugLog('🔍 Searching for "Start Watching" elements...');
+        debugLog('🔍 Searching for mature content elements...');
         
-        // Get ALL elements in the document
+        // Get all elements in the document
         const allElements = document.querySelectorAll('*');
-        debugLog(`📋 Scanning ${allElements.length} total elements...`);
+        const foundElements = [];
         
-        // Look through every single element for "Start Watching" text
-        for (let i = 0; i < allElements.length; i++) {
-            const element = allElements[i];
-            const text = (element.textContent || element.innerText || '').trim();
+        for (const element of allElements) {
+            // Skip our own debug panel and controls
+            if (element.closest('.debug-panel') || 
+                element.closest('.controls') || 
+                element.closest('.status') ||
+                element.closest('.latency-display')) {
+                continue;
+            }
             
-            // Check if this element contains "Start Watching"
-            if (text.toLowerCase().includes('start watching')) {
-                debugLog(`🎯 Found element with "Start Watching": ${element.tagName} - "${text}"`);
-                debugLog(`   Element classes: ${element.className}`);
-                debugLog(`   Element data attributes: ${JSON.stringify(element.dataset)}`);
+            const text = (element.textContent || element.innerText || '').trim();
+            const tagName = element.tagName.toLowerCase();
+            const dataTarget = element.getAttribute('data-a-target') || '';
+            
+            // Log interesting elements for debugging
+            if (text.toLowerCase().includes('start') || 
+                text.toLowerCase().includes('watching') ||
+                dataTarget.includes('button') ||
+                dataTarget.includes('mature') ||
+                tagName === 'button') {
+                foundElements.push({
+                    tag: tagName,
+                    text: text.substring(0, 50),
+                    dataTarget: dataTarget,
+                    visible: element.offsetParent !== null
+                });
+            }
+            
+            // Look for "Start Watching" text anywhere
+            if (text.toLowerCase().includes('start watching') && element.offsetParent !== null) {
+                debugLog(`🎯 Found "Start Watching" element: ${tagName}, text: "${text}", data-target: "${dataTarget}"`);
                 
-                // Try to click this element
-                if (element.offsetParent !== null) { // Make sure it's visible
-                    try {
-                        debugLog(`   👆 Attempting to click element directly...`);
-                        element.click();
-                        updateStatus('Auto-clicked Start Watching (direct)', 'success');
-                        return true;
-                    } catch (e) {
-                        debugLog(`   ❌ Direct click failed: ${e.message}`);
+                // Try to click it or find a clickable parent
+                let clickTarget = element;
+                
+                // If it's not a button, look for a button parent
+                if (tagName !== 'button') {
+                    const buttonParent = element.closest('button');
+                    if (buttonParent) {
+                        clickTarget = buttonParent;
+                        debugLog(`🎯 Using button parent for clicking`);
+                    } else {
+                        // Make it clickable if it's not
+                        element.style.cursor = 'pointer';
+                        clickTarget = element;
+                        debugLog(`🎯 Making element clickable directly`);
                     }
-                    
-                    // Try to click parent button
-                    const parentButton = element.closest('button');
-                    if (parentButton) {
-                        try {
-                            debugLog(`   👆 Attempting to click parent button...`);
-                            parentButton.click();
-                            updateStatus('Auto-clicked Start Watching (parent)', 'success');
-                            return true;
-                        } catch (e) {
-                            debugLog(`   ❌ Parent button click failed: ${e.message}`);
-                        }
-                    }
-                    
-                    // Try to click parent div or any clickable parent
-                    const clickableParent = element.closest('[onclick], [role="button"], .clickable, [tabindex]');
-                    if (clickableParent) {
-                        try {
-                            debugLog(`   👆 Attempting to click clickable parent...`);
-                            clickableParent.click();
-                            updateStatus('Auto-clicked Start Watching (clickable parent)', 'success');
-                            return true;
-                        } catch (e) {
-                            debugLog(`   ❌ Clickable parent click failed: ${e.message}`);
-                        }
-                    }
-                    
-                    // Last resort: dispatch mouse events
-                    try {
-                        debugLog(`   👆 Attempting to dispatch mouse events...`);
-                        const clickEvent = new MouseEvent('click', {
-                            view: window,
-                            bubbles: true,
-                            cancelable: true
-                        });
-                        element.dispatchEvent(clickEvent);
-                        updateStatus('Auto-clicked Start Watching (event)', 'success');
-                        return true;
-                    } catch (e) {
-                        debugLog(`   ❌ Mouse event dispatch failed: ${e.message}`);
-                    }
+                }
+                
+                try {
+                    clickTarget.click();
+                    debugLog(`✅ Successfully clicked "Start Watching" element`);
+                    updateStatus('Auto-clicked Start Watching', 'success');
+                    return true;
+                } catch (clickError) {
+                    debugLog(`❌ Click failed: ${clickError.message}`);
                 }
             }
         }
         
-        // Also check for common button selectors that might not have visible text
-        const buttonSelectors = [
-            'button',
-            '[role="button"]',
-            '.button',
-            '[onclick]',
-            '[data-a-target*="button"]',
-            '[data-a-target*="mature"]',
-            '[data-a-target*="gate"]'
-        ];
-        
-        for (const selector of buttonSelectors) {
-            const buttons = document.querySelectorAll(selector);
-            for (const button of buttons) {
-                const text = (button.textContent || button.innerText || button.getAttribute('aria-label') || '').trim();
-                if (text.toLowerCase().includes('start') || text.toLowerCase().includes('watching') || text.toLowerCase().includes('continue')) {
-                    debugLog(`🎯 Found potential button: ${selector} - "${text}"`);
-                    if (button.offsetParent !== null) {
-                        try {
-                            button.click();
-                            updateStatus('Auto-clicked potential button', 'success');
-                            return true;
-                        } catch (e) {
-                            debugLog(`   ❌ Button click failed: ${e.message}`);
-                        }
-                    }
-                }
-            }
+        // Log what we found for debugging
+        if (foundElements.length > 0) {
+            debugLog(`Found ${foundElements.length} potentially relevant elements:`);
+            foundElements.slice(0, 5).forEach((el, i) => {
+                debugLog(`  ${i+1}. ${el.tag} - "${el.text}" - ${el.dataTarget} - visible: ${el.visible}`);
+            });
+        } else {
+            debugLog('No relevant elements found in this scan');
         }
         
-        debugLog('❌ No "Start Watching" elements found');
         return false;
     } catch (e) {
         debugLog(`❌ Mature content bypass error: ${e.message}`);
@@ -240,29 +213,57 @@ function startMatureContentMonitoring() {
     
     // Set up MutationObserver to watch for dynamically added content
     const observer = new MutationObserver((mutations) => {
+        let shouldCheck = false;
+        
         mutations.forEach((mutation) => {
             if (mutation.type === 'childList') {
                 mutation.addedNodes.forEach((node) => {
                     if (node.nodeType === Node.ELEMENT_NODE) {
-                        // Check if this node or its children contain mature content elements
-                        const element = node;
-                        const matureElements = element.querySelectorAll ? element.querySelectorAll('[data-a-target*="tw-core-button-label-text"], [data-a-target*="mature"], button') : [];
+                        shouldCheck = true;
                         
-                        for (const el of matureElements) {
-                            const text = el.textContent || el.innerText || '';
-                            if (text.toLowerCase().includes('start watching')) {
-                                debugLog(`🎯 MutationObserver found mature content button: "${text}"`);
-                                const clickTarget = el.closest('button') || el;
-                                clickTarget.click();
-                                updateStatus('Auto-clicked Start Watching (MutationObserver)', 'success');
-                                stopMatureContentMonitoring();
-                                return;
+                        // Check the added node and all its descendants
+                        const elementsToCheck = [node];
+                        if (node.querySelectorAll) {
+                            elementsToCheck.push(...node.querySelectorAll('*'));
+                        }
+                        
+                        for (const element of elementsToCheck) {
+                            // Skip our own debug elements
+                            if (element.closest && (element.closest('.debug-panel') || 
+                                element.closest('.controls') || 
+                                element.closest('.status') ||
+                                element.closest('.latency-display'))) {
+                                continue;
+                            }
+                            
+                            const text = (element.textContent || element.innerText || '').trim();
+                            if (text.toLowerCase().includes('start watching') && element.offsetParent !== null) {
+                                debugLog(`🎯 MutationObserver found "Start Watching": ${element.tagName} - "${text}"`);
+                                
+                                const clickTarget = element.closest('button') || element;
+                                try {
+                                    clickTarget.click();
+                                    updateStatus('Auto-clicked Start Watching (MutationObserver)', 'success');
+                                    stopMatureContentMonitoring();
+                                    return;
+                                } catch (e) {
+                                    debugLog(`❌ MutationObserver click failed: ${e.message}`);
+                                }
                             }
                         }
                     }
                 });
             }
         });
+        
+        // If we detected changes, do a full scan
+        if (shouldCheck) {
+            setTimeout(() => {
+                if (attemptMatureContentBypass()) {
+                    stopMatureContentMonitoring();
+                }
+            }, 100);
+        }
     });
     
     // Start observing the document with the configured parameters
@@ -367,6 +368,17 @@ function refreshStream() {
             debugLog(`Refresh error: ${e.message}`);
             updateStatus('Refresh failed', 'error');
         }
+    }
+}
+
+function manualMatureBypass() {
+    debugLog('Manual mature content bypass triggered...');
+    updateStatus('Manual bypass attempt...', 'info');
+    
+    if (attemptMatureContentBypass()) {
+        updateStatus('Manual bypass successful!', 'success');
+    } else {
+        updateStatus('No mature content found', 'warning');
     }
 }
 
@@ -552,8 +564,8 @@ function initializeTwitchPlayer() {
             updateStatus('Player ready!', 'success');
             if (loadingDiv) loadingDiv.style.display = 'none';
             
-            // Start mature content monitoring after player is ready
-            setTimeout(() => startMatureContentMonitoring(), 1000);
+            // Start mature content monitoring immediately when player is ready
+            startMatureContentMonitoring();
             
             // Start latency monitoring
             startLatencyMonitoring();
@@ -689,5 +701,5 @@ window.addEventListener('beforeunload', function() {
     }
 });
 
-debugLog('🌐 GitHub Pages Twitch embed initialized with mature content bypass');
+debugLog('🌐 GitHub Pages Twitch embed initialized with mature content bypass v2.1');
 </script></body></html>
