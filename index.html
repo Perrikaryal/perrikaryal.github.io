@@ -46,7 +46,7 @@ html,body{margin:0;height:100%;width:100%;background:#000;font-family:-apple-sys
 </div>
 
 <script>
-console.log('🌐 Twitch GitHub Pages Embed v2.6 - Smart Detection + Tab Tab Enter');
+console.log('🌐 Twitch GitHub Pages Embed v2.7 - Real User Event Simulation');
 console.log('📍 URL:', window.location.href);
 console.log('🖥️ User Agent:', navigator.userAgent);
 
@@ -71,9 +71,10 @@ const config = {
     autoBypassMature: autoBypassMature,
     latencyInterval: 1000,
     latencyTimeout: 5000,
-    matureCheckInterval: 500, // Less aggressive - every 500ms 
-    maxMatureRetries: 60, // Check for 30 seconds
-    verboseLogging: false // Reduce log spam
+    matureCheckInterval: 500,
+    maxMatureRetries: 60,
+    verboseLogging: false,
+    showUserPrompt: urlParams.get('showUserPrompt') !== 'false' // New option
 };
 
 console.log('⚙️ Config:', config);
@@ -131,7 +132,7 @@ function detectAndBypassMatureContent() {
             return false;
         }
         
-        // Method 1: Check player state
+        // Method 1: Check player state to detect warning
         let playerIndicatesMatureWarning = false;
         if (player && playerReady) {
             try {
@@ -148,62 +149,28 @@ function detectAndBypassMatureContent() {
             }
         }
         
-        // Method 2: Check iframe dimensions/visibility changes
-        const rect = twitchIframe.getBoundingClientRect();
-        const iframeVisible = rect.width > 0 && rect.height > 0;
-        
-        // Method 3: Time-based detection - mature warnings usually appear within first few seconds
+        // Time-based detection - mature warnings usually appear within first few seconds
         const timeSincePlayerReady = Date.now() - (window.playerReadyTime || Date.now());
         const withinWarningWindow = timeSincePlayerReady < 10000; // 10 seconds
         
-        debugLog(`📊 Detection: playerPaused=${playerIndicatesMatureWarning}, iframeVisible=${iframeVisible}, timeWindow=${withinWarningWindow}`);
+        debugLog(`📊 Detection: playerPaused=${playerIndicatesMatureWarning}, timeWindow=${withinWarningWindow}`);
         
         // Only proceed if we have good reason to believe warning is present
-        if (playerIndicatesMatureWarning || (withinWarningWindow && iframeVisible)) {
-            debugLog('✅ Mature content warning likely present - executing Tab+Tab+Enter sequence');
+        if (playerIndicatesMatureWarning || withinWarningWindow) {
+            debugLog('✅ Mature content warning likely present');
             
-            // Focus the iframe first
-            twitchIframe.focus();
+            // Method 1: Try more realistic user input simulation
+            if (tryRealisticKeyboardSimulation(twitchIframe)) {
+                return true;
+            }
             
-            // Execute the exact sequence you confirmed works: Tab, Tab, Enter
-            setTimeout(() => {
-                // First Tab
-                sendKeyToIframe(twitchIframe, 'Tab', 9);
-                debugLog('⌨️ Sent: Tab (1/3)');
-                
-                setTimeout(() => {
-                    // Second Tab  
-                    sendKeyToIframe(twitchIframe, 'Tab', 9);
-                    debugLog('⌨️ Sent: Tab (2/3)');
-                    
-                    setTimeout(() => {
-                        // Enter
-                        sendKeyToIframe(twitchIframe, 'Enter', 13);
-                        debugLog('⌨️ Sent: Enter (3/3) - sequence complete!');
-                        
-                        // Check if it worked after a delay
-                        setTimeout(() => {
-                            if (player && playerReady) {
-                                try {
-                                    if (!player.isPaused()) {
-                                        debugLog('🎵 SUCCESS! Player is now playing - mature content bypassed!');
-                                        updateStatus('🎵 Mature content bypassed!', 'success');
-                                        return true;
-                                    } else {
-                                        debugLog('⚠️ Player still paused - bypass may not have worked');
-                                    }
-                                } catch (e) {
-                                    // Silent check
-                                }
-                            }
-                        }, 1000);
-                        
-                    }, 200); // 200ms between Tab and Enter
-                }, 200); // 200ms between first and second Tab
-            }, 100); // 100ms delay before starting sequence
+            // Method 2: Show user prompt if enabled
+            if (config.showUserPrompt) {
+                showUserPrompt();
+                return true;
+            }
             
-            updateStatus('🎯 Executing Tab+Tab+Enter', 'info');
-            return true;
+            return false;
         } else {
             debugLog('ℹ️ No indication of mature content warning present');
             return false;
@@ -215,34 +182,161 @@ function detectAndBypassMatureContent() {
     }
 }
 
-// Helper function to send keyboard events to iframe
-function sendKeyToIframe(iframe, key, keyCode) {
-    const events = ['keydown', 'keypress', 'keyup'];
+// Try more realistic keyboard simulation
+function tryRealisticKeyboardSimulation(iframe) {
+    debugLog('🎯 Attempting realistic keyboard simulation...');
     
-    events.forEach(eventType => {
-        const event = new KeyboardEvent(eventType, {
-            key: key,
-            keyCode: keyCode,
-            which: keyCode,
-            bubbles: true,
-            cancelable: true
-        });
+    try {
+        // Method 1: Use InputEvent API for more realistic events
+        iframe.focus();
         
-        // Send to iframe
-        iframe.dispatchEvent(event);
+        // Wait for focus to properly set
+        setTimeout(() => {
+            // Try using InputEvent which is more like real user input
+            const tabEvent1 = new KeyboardEvent('keydown', {
+                key: 'Tab',
+                code: 'Tab',
+                keyCode: 9,
+                which: 9,
+                bubbles: true,
+                cancelable: true,
+                isTrusted: false // Browsers will still know this is programmatic
+            });
+            
+            // Dispatch to multiple targets
+            iframe.dispatchEvent(tabEvent1);
+            document.dispatchEvent(tabEvent1);
+            window.dispatchEvent(tabEvent1);
+            
+            setTimeout(() => {
+                const tabEvent2 = new KeyboardEvent('keydown', {
+                    key: 'Tab',
+                    code: 'Tab', 
+                    keyCode: 9,
+                    which: 9,
+                    bubbles: true,
+                    cancelable: true,
+                    isTrusted: false
+                });
+                
+                iframe.dispatchEvent(tabEvent2);
+                document.dispatchEvent(tabEvent2);
+                window.dispatchEvent(tabEvent2);
+                
+                setTimeout(() => {
+                    const enterEvent = new KeyboardEvent('keydown', {
+                        key: 'Enter',
+                        code: 'Enter',
+                        keyCode: 13,
+                        which: 13,
+                        bubbles: true,
+                        cancelable: true,
+                        isTrusted: false
+                    });
+                    
+                    iframe.dispatchEvent(enterEvent);
+                    document.dispatchEvent(enterEvent);
+                    window.dispatchEvent(enterEvent);
+                    
+                    debugLog('⌨️ Realistic keyboard simulation complete');
+                    
+                    // Check if it worked
+                    setTimeout(() => {
+                        if (player && playerReady && !player.isPaused()) {
+                            debugLog('🎵 SUCCESS! Realistic simulation worked!');
+                            updateStatus('🎵 Bypass successful!', 'success');
+                            return true;
+                        } else {
+                            debugLog('❌ Realistic simulation failed - browser security blocks programmatic input');
+                            return false;
+                        }
+                    }, 1000);
+                    
+                }, 300); // Longer delays for more realistic timing
+            }, 300);
+        }, 500); // Wait for focus
         
-        // Also send to currently focused element as backup
-        if (document.activeElement) {
-            document.activeElement.dispatchEvent(event);
+        return false; // Will be updated by setTimeout callbacks
+        
+    } catch (e) {
+        debugLog(`❌ Realistic simulation error: ${e.message}`);
+        return false;
+    }
+}
+
+// Show user prompt when programmatic methods fail
+function showUserPrompt() {
+    debugLog('📢 Showing user prompt for manual bypass');
+    
+    // Create a prominent overlay
+    const overlay = document.createElement('div');
+    overlay.id = 'mature-content-prompt';
+    overlay.style.cssText = `
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: rgba(138, 43, 226, 0.95);
+        color: white;
+        padding: 20px 30px;
+        border-radius: 12px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+        font-size: 16px;
+        font-weight: 600;
+        z-index: 10000;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        border: 2px solid rgba(255, 255, 255, 0.2);
+        text-align: center;
+        animation: fadeIn 0.3s ease-in-out;
+    `;
+    
+    overlay.innerHTML = `
+        <div style="font-size: 18px; margin-bottom: 15px;">🎯 Mature Content Detected</div>
+        <div style="margin-bottom: 15px;">Please press: <strong>Tab → Tab → Enter</strong></div>
+        <div style="font-size: 14px; opacity: 0.8;">This will bypass the age verification</div>
+    `;
+    
+    // Add fade-in animation
+    const style = document.createElement('style');
+    style.textContent = `
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translate(-50%, -60%); }
+            to { opacity: 1; transform: translate(-50%, -50%); }
         }
-    });
+    `;
+    document.head.appendChild(style);
+    
+    document.body.appendChild(overlay);
+    
+    // Auto-hide after 5 seconds or when player starts playing
+    const hideTimer = setTimeout(() => {
+        if (overlay.parentNode) {
+            overlay.remove();
+        }
+    }, 5000);
+    
+    // Monitor for player state change
+    const checkInterval = setInterval(() => {
+        if (player && playerReady && !player.isPaused()) {
+            debugLog('🎵 Player started - hiding prompt');
+            clearTimeout(hideTimer);
+            clearInterval(checkInterval);
+            if (overlay.parentNode) {
+                overlay.style.animation = 'fadeOut 0.3s ease-in-out';
+                setTimeout(() => overlay.remove(), 300);
+            }
+            updateStatus('🎵 Manual bypass successful!', 'success');
+        }
+    }, 500);
+    
+    updateStatus('📢 Manual action required', 'warning');
 }
 
 // Start monitoring for mature content warnings
 function startMatureContentMonitoring() {
     if (!config.autoBypassMature || matureContentMonitor) return;
     
-    debugLog('🔍 Starting smart mature content detection v2.6');
+    debugLog('🔍 Starting smart mature content detection v2.7');
     matureRetryCount = 0;
     
     // Set up MutationObserver for iframe changes
@@ -397,7 +491,7 @@ function manualMatureBypass() {
     updateStatus('🎬 Checking for warning...', 'info');
     
     if (detectAndBypassMatureContent()) {
-        updateStatus('🎬 Tab+Tab+Enter sent!', 'success');
+        updateStatus('🎬 Detection complete!', 'success');
     } else {
         updateStatus('🎬 No warning detected', 'warning');
     }
@@ -747,5 +841,5 @@ window.addEventListener('beforeunload', function() {
     }
 });
 
-debugLog('🌐 GitHub Pages Twitch embed initialized with mature content bypass v2.6');
+debugLog('🌐 GitHub Pages Twitch embed initialized with mature content bypass v2.7');
 </script></body></html>
